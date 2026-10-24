@@ -3,13 +3,15 @@
 Remote access for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH), rebuilt for **isolation and stability**:
 
 - **Sidecar process** — the tunnel + authenticated gateway run in their own Node process, so a tunnel restart or crash never takes DSH down and sidecar updates do not require restarting the app.
-- **Pluggable transport** — Cloudflare Quick Tunnel (zero-config) or a Named Tunnel with your own stable hostname.
+- **Pluggable transport** — Cloudflare Quick Tunnel (zero-config), a Named Tunnel with your own stable hostname, or **Tailscale Serve** (tailnet-only).
 - **One-time pairing** — 256-bit QR secret plus an 8-character manual code, single use, 5-minute TTL, per-ticket attempt cap and global rate limit.
 - **Device sessions** — 7-day sliding sessions, revocable individually or all at once, only SHA-256 hashes persisted.
 - **Loopback gateway** — binds `127.0.0.1` only, exact Host/Origin policy, decode-safe deny of the management plane, hop-by-hop/edge headers stripped before reaching DSH.
 - **No build step, no runtime npm dependencies** — plain ESM JavaScript; the QR generator is vendored.
 
-> Status: **v0.1.0 MVP**. Quick/Named tunnel, pairing, devices, settings UI and diagnostics are implemented; Tailscale/frp transports and E2E chaos tests are on the roadmap.
+> Status: **v0.1.0** — Quick / Named / Tailscale transports, pairing, devices, settings UI and diagnostics are implemented.
+>
+> 📖 **中文使用指南：[docs/USAGE.zh-CN.md](docs/USAGE.zh-CN.md)** — 安装/配对/Tailscale/Named/Quick Tunnel/常见问题，含「一句话让 AI 安装」提示词。
 
 ## Architecture
 
