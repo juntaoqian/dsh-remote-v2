@@ -377,15 +377,18 @@ export function createGateway(options) {
   })
 
   return {
-    /** Start listening on a random loopback port. */
-    start() {
+    /**
+     * Start listening on loopback.
+     * @param {number} [port] fixed port for a Named Tunnel, or 0 for a random one.
+     */
+    start(port = 0) {
       return new Promise((resolvePromise, reject) => {
         server.once('error', reject)
-        server.listen(0, '127.0.0.1', () => {
+        server.listen(port, '127.0.0.1', () => {
           server.off('error', reject)
           const address = server.address()
-          const port = typeof address === 'object' && address !== null ? address.port : 0
-          resolvePromise({ port })
+          const boundPort = typeof address === 'object' && address !== null ? address.port : 0
+          resolvePromise({ port: boundPort })
         })
       })
     },

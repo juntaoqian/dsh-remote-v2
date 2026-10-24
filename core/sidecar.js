@@ -106,6 +106,8 @@ export function isPidAlive(pid) {
  *   getPublicOrigin: () => URL|undefined,
  *   setPublicOrigin: (origin: URL|undefined) => void,
  *   getCloudflaredPath: () => string|undefined,
+ *   getGatewayPort?: () => number,
+ *   rebindGateway?: (port: number) => Promise<number>,
  *   startedAt?: number,
  *   now?: () => number,
  * }} deps
@@ -123,6 +125,8 @@ export function createSidecarRuntime(deps) {
     getPublicOrigin,
     setPublicOrigin,
     getCloudflaredPath,
+    getGatewayPort = () => 0,
+    rebindGateway,
     startedAt = Date.now(),
     now = Date.now,
   } = deps;
@@ -180,6 +184,7 @@ export function createSidecarRuntime(deps) {
       phase,
       transport: activeTransport,
       version: env.version,
+      gatewayPort: getGatewayPort(),
       devices: devices.list(),
       pairing: pairingSnapshot(publicUrl),
       edge: {
@@ -213,9 +218,24 @@ export function createSidecarRuntime(deps) {
       if (record.transport !== undefined) requested.transport = record.transport;
       if (record.namedToken !== undefined) requested.namedToken = record.namedToken;
       if (record.publicUrl !== undefined) requested.publicUrl = record.publicUrl;
+      if (record.gatewayPort !== undefined) requested.gatewayPort = record.gatewayPort;
       const merged = normalizeConfig(requested);
       if (merged.transport === 'named' && !merged.namedToken) {
         throw codedError('invalid-settings', 'namedToken is required for the named transport');
+      }
+
+      // Switching to a fixed port requires rebinding before the Named Tunnel
+      // starts; a running tunnel must be stopped first.
+      const existing = getTunnel();
+      const existingPhase = existing ? existing.status().phase : 'idle';
+      if (existingPhase !== 'idle') {
+        throw codedError('already-running', '远程访问已在运行，请先停止再修改传输配置');
+      }
+      if (merged.gatewayPort !== 0 && merged.gatewayPort !== getGatewayPort()) {
+        if (typeof rebindGateway !== 'function') {
+          throw codedError('internal', 'gateway rebind is unavailable');
+        }
+        await rebindGateway(merged.gatewayPort);
       }
 
       pendingStart = { transport: merged.transport };
@@ -309,8 +329,21 @@ export function createSidecarRuntime(deps) {
      * @returns {Promise<object>} Persisted configuration.
      */
     async configSet(patch) {
-      config = await configStore.set(patch);
-      logger.info('runtime.config-updated', { transport: config.transport });
+      const record = patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {};
+      const next = normalizeConfig({ ...config, ...record });
+      const tunnel = getTunnel();
+      const phase = tunnel ? tunnel.status().phase : 'idle';
+      const running = phase !== 'idle';
+      const connectionChanged =
+        next.transport !== config.transport ||
+        next.namedToken !== config.namedToken ||
+        next.publicUrl !== config.publicUrl ||
+        next.gatewayPort !== config.gatewayPort;
+      if (running && connectionChanged) {
+        throw codedError('stop-first', '请先停止远程访问再修改传输配置');
+      }
+      config = await configStore.set(next);
+      logger.info('runtime.config-updated', { transport: config.transport, gatewayPort: config.gatewayPort });
       return config;
     },
 
@@ -328,7 +361,12 @@ export function createSidecarRuntime(deps) {
         publicUrl: currentPublicUrl(),
         cloudflaredPath: getCloudflaredPath() ?? null,
         tunnel: tunnelStatus,
-        config: { transport: config.transport, autoStart: config.autoStart, publicUrl: config.publicUrl },
+        config: {
+          transport: config.transport,
+          autoStart: config.autoStart,
+          publicUrl: config.publicUrl,
+          gatewayPort: config.gatewayPort,
+        },
         logs: logger.recent(200),
       };
     },
@@ -433,8 +471,37 @@ export async function main(env = process.env) {
     getPublicOrigin,
     getLaunchUrl: resolveLaunchUrl,
   });
-  const gatewayAddress = await gateway.start();
+  /** @type {number} */
+  let currentGatewayPort = 0;
+  let gatewayAddress = { port: 0 };
+  try {
+    gatewayAddress = await gateway.start(initialConfig.gatewayPort);
+  } catch (error) {
+    // A fixed port can be occupied by another process. Fail closed for Named
+    // Tunnels, but keep Quick Tunnels usable with a random port.
+    if (initialConfig.gatewayPort === 0) throw error;
+    logger.error('gateway.fixed-port-unavailable', { port: initialConfig.gatewayPort, error });
+    gatewayAddress = await gateway.start(0);
+  }
+  currentGatewayPort = gatewayAddress.port;
   logger.info('gateway.listening', { port: gatewayAddress.port, upstream: parsedEnv.upstream.origin });
+
+  /**
+   * Rebind the gateway to a fixed port before a Named Tunnel starts.
+   *
+   * @param {number} port Fixed loopback port.
+   * @returns {Promise<number>} The bound port.
+   */
+  async function rebindGateway(port) {
+    if (port === currentGatewayPort) return currentGatewayPort;
+    await gateway.stop();
+    const address = await gateway.start(port);
+    currentGatewayPort = address.port;
+    // The tunnel manager captured the old port; drop it so it is recreated.
+    tunnelManager = null;
+    logger.info('gateway.rebound', { port: currentGatewayPort });
+    return currentGatewayPort;
+  }
 
   /** @type {string|undefined} */
   let cloudflaredPath;
@@ -491,7 +558,7 @@ export async function main(env = process.env) {
     if (!tunnelManager) {
       tunnelManager = createTunnelManager({
         cloudflaredPath: resolvedPath,
-        gatewayPort: gatewayAddress.port,
+        gatewayPort: currentGatewayPort,
         logger,
         onState: handleTunnelState,
       });
@@ -511,6 +578,8 @@ export async function main(env = process.env) {
     getPublicOrigin,
     setPublicOrigin,
     getCloudflaredPath: () => cloudflaredPath,
+    getGatewayPort: () => currentGatewayPort,
+    rebindGateway,
     startedAt,
   });
 

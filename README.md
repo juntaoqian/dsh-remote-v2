@@ -66,6 +66,35 @@ See `docs/contracts.md` for module and API contracts.
 4. Click **生成配对码**, scan the QR with your phone (or type the 8-character code).
 5. Manage/revoke paired devices in the same page; stop remote access with **关闭**.
 
+## Named Tunnel (stable URL) — token and hostname setup
+
+A Named Tunnel keeps the same public hostname across restarts. It needs a domain
+whose nameservers point at Cloudflare (the free plan is enough) and a fixed local
+port, because the Cloudflare **Public Hostname** is configured to forward to
+`http://127.0.0.1:<gatewayPort>`.
+
+1. **Create the tunnel** — Cloudflare dashboard → **Zero Trust → Networks → Tunnels → Create a tunnel** → connector **Cloudflared** → name it (e.g. `dsh-remote`) → Save.
+2. **Copy the token** — the connector-install page shows a command like
+   `cloudflared service install eyJhIjoi...`. The long string after `install` **is the token**.
+   CLI alternative: `cloudflared tunnel token dsh-remote` (after `cloudflared tunnel login` and `cloudflared tunnel create`).
+3. **Add a Public Hostname** — tunnel → **Public Hostname → Add**:
+   - Subdomain: `dsh`, Domain: `example.com`
+   - Service: **HTTP**, URL: `127.0.0.1:26001` (must equal the plugin's local gateway port)
+   - Save (DNS is created automatically).
+4. **Configure the plugin** — 设置 → 远程访问:
+   - 传输方式: **Named Tunnel**
+   - Tunnel token: paste the token
+   - 公网地址: `https://dsh.example.com`
+   - 本地网关端口: `26001` (same as step 3)
+   - 保存配置 → 开启.
+5. Optional defense in depth: put **Cloudflare Access** in front of the hostname (email/SSO); the plugin's own pairing still applies on top.
+
+> The token is a machine credential for the tunnel (tunnel id + secret). Treat it
+> like a password: it is stored only in the plugin state directory
+> (`~/.dsh/plugins/dsh-remote-v2/config.json`, mode 0600), never logged. Delete
+> and recreate the tunnel to rotate it.
+
+
 ## Security model
 
 - Public entry is CLOSED (503) until the tunnel reports a validated origin; stop clears the origin before killing the tunnel.

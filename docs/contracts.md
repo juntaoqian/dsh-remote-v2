@@ -253,6 +253,8 @@ window.__ModuleLoader__.load({ id: 'dsh-remote-v2', factory: (require) => {
   "transport": "quick",
   "namedToken": "",        // 仅 named
   "publicUrl": "",         // 仅 named，https URL
+  "gatewayPort": 0,        // 0=随机；named 必须固定端口（1024-65535），
+                           // Cloudflare Public Hostname 指向 http://127.0.0.1:<gatewayPort>
   "autoStart": false
 }
 ```

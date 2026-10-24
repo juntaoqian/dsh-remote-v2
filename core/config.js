@@ -18,11 +18,15 @@ import { homedir } from 'node:os';
 
 /** Transport flavours supported by the sidecar. @typedef {'quick'|'named'} Transport */
 
-/** Default persisted configuration (contract section 12). @type {Readonly<{transport: Transport, namedToken: string, publicUrl: string, autoStart: boolean}>} */
+/** Default persisted configuration (contract section 12). @type {Readonly<{transport: Transport, namedToken: string, publicUrl: string, gatewayPort: number, autoStart: boolean}>} */
 export const CONFIG_DEFAULTS = Object.freeze({
   transport: /** @type {Transport} */ ('quick'),
   namedToken: '',
   publicUrl: '',
+  // 0 asks the OS for a random loopback port (Quick Tunnel). A Named Tunnel
+  // needs a STABLE port because the Cloudflare public hostname points at
+  // http://127.0.0.1:<gatewayPort>.
+  gatewayPort: 0,
   autoStart: false,
 });
 
@@ -122,7 +126,7 @@ export function normalizeHttpsPublicUrl(raw, options = {}) {
  * arbitrary values into `config.json`.
  *
  * @param {unknown} input Raw configuration object.
- * @returns {{transport: Transport, namedToken: string, publicUrl: string, autoStart: boolean}}
+ * @returns {{transport: Transport, namedToken: string, publicUrl: string, gatewayPort: number, autoStart: boolean}}
  * @throws {Error & {code: 'invalid-config'}} When a field is invalid.
  */
 export function normalizeConfig(input = {}) {
@@ -156,10 +160,25 @@ export function normalizeConfig(input = {}) {
     throw createConfigError('invalid-config', 'autoStart must be a boolean');
   }
 
+  const rawGatewayPort = record.gatewayPort === undefined ? CONFIG_DEFAULTS.gatewayPort : record.gatewayPort;
+  if (typeof rawGatewayPort !== 'number' || !Number.isInteger(rawGatewayPort)) {
+    throw createConfigError('invalid-config', 'gatewayPort must be an integer');
+  }
+  if (rawGatewayPort !== 0 && (rawGatewayPort < 1024 || rawGatewayPort > 65535)) {
+    throw createConfigError('invalid-config', 'gatewayPort must be 0 (random) or between 1024 and 65535');
+  }
+  if (transport === 'named' && rawGatewayPort === 0) {
+    throw createConfigError(
+      'invalid-config',
+      'named transport requires a fixed gatewayPort (1024-65535) because the Cloudflare public hostname targets http://127.0.0.1:<gatewayPort>',
+    );
+  }
+
   return {
     transport: /** @type {Transport} */ (transport),
     namedToken: rawNamedToken.trim(),
     publicUrl,
+    gatewayPort: rawGatewayPort,
     autoStart: rawAutoStart,
   };
 }
