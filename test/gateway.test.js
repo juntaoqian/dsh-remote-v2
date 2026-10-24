@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
+import net from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -264,5 +265,74 @@ test('pairing page and claim issue a device cookie; the ticket is single-use', a
     assert.equal(reused.status, 401)
   } finally {
     await harness.dispose()
+  }
+})
+
+test('websocket upgrade forwards the handshake to the upstream', async () => {
+  /** @type {import('node:http').IncomingHttpHeaders|undefined} */
+  let captured
+  const upstream = http.createServer()
+  upstream.on('upgrade', (req, socket) => {
+    captured = req.headers
+    socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
+    socket.end()
+  })
+  const upstreamPort = await listen(upstream)
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-remote-v2-gateway-ws-'))
+  const devices = await createDeviceStore({ file: join(dir, 'devices.json'), ttlMs: 3600_000 })
+  const pairing = createPairingService()
+  const gateway = createGateway({
+    upstream: new URL(`http://127.0.0.1:${upstreamPort}`),
+    devices,
+    pairing,
+    getPublicOrigin: () => new URL('http://public.test'),
+    getLaunchUrl: async () => undefined,
+    cookieSecure: false,
+  })
+  const { port } = await gateway.start()
+  try {
+    const { token } = await devices.create('ws-test')
+    const response = await new Promise((resolvePromise, reject) => {
+      const socket = net.connect({ host: '127.0.0.1', port }, () => {
+        socket.write(
+          [
+            'GET /api/remote.mux HTTP/1.1',
+            'Host: public.test',
+            'Upgrade: websocket',
+            'Connection: Upgrade',
+            'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+            'Sec-WebSocket-Version: 13',
+            'Origin: http://public.test',
+            `Cookie: dsh_remote_v2=${token}`,
+            '',
+            '',
+          ].join('\r\n'),
+        )
+      })
+      let data = ''
+      socket.on('data', (chunk) => {
+        data += chunk.toString('latin1')
+        if (data.includes('\r\n\r\n')) {
+          socket.destroy()
+          resolvePromise(data.split('\r\n\r\n')[0])
+        }
+      })
+      socket.on('error', reject)
+      const timer = setTimeout(() => {
+        socket.destroy()
+        reject(new Error('websocket probe timed out'))
+      }, 4_000)
+      timer.unref?.()
+    })
+    assert.match(response, /^HTTP\/1\.1 101/)
+    assert.ok(captured !== undefined)
+    assert.equal(captured.upgrade, 'websocket')
+    assert.match(String(captured.connection), /upgrade/i)
+    assert.equal(String(captured.host), `127.0.0.1:${upstreamPort}`)
+    assert.equal(String(captured.cookie ?? '').includes('dsh_remote_v2'), false)
+  } finally {
+    await gateway.stop()
+    await close(upstream)
+    await rm(dir, { recursive: true, force: true })
   }
 })

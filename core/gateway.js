@@ -272,13 +272,19 @@ export function createGateway(options) {
   }
 
   /** Apply upstream header normalization in place. */
-  function prepareUpstreamHeaders(req) {
+  function prepareUpstreamHeaders(req, { preserveUpgrade = false } = {}) {
     const headers = {}
     for (const [name, value] of Object.entries(req.headers)) {
       if (value === undefined) continue
       headers[name] = value
     }
-    for (const name of STRIPPED_UPSTREAM_HEADERS) delete headers[name]
+    for (const name of STRIPPED_UPSTREAM_HEADERS) {
+      // The WebSocket handshake IS the hop-by-hop pair: stripping `connection`
+      // and `upgrade` would turn a real upgrade into a plain GET, which DSH
+      // answers with 404 for the mux route (the remote UI then spins forever).
+      if (preserveUpgrade && (name === 'connection' || name === 'upgrade')) continue
+      delete headers[name]
+    }
     delete headers.host
     headers.host = upstream.host
     if (headers.origin !== undefined) headers.origin = upstream.origin
@@ -371,7 +377,7 @@ export function createGateway(options) {
         socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
         return
       }
-      prepareUpstreamHeaders(req)
+      prepareUpstreamHeaders(req, { preserveUpgrade: true })
       proxy.ws(req, socket, head, () => socket.destroy())
     })().catch(() => socket.destroy())
   })
