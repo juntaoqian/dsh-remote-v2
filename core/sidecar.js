@@ -223,6 +223,9 @@ export function createSidecarRuntime(deps) {
       if (merged.transport === 'named' && !merged.namedToken) {
         throw codedError('invalid-settings', 'namedToken is required for the named transport');
       }
+      if (merged.transport === 'tailscale' && !merged.publicUrl) {
+        throw codedError('invalid-settings', 'tailscale transport requires the https publicUrl served by tailscale serve');
+      }
 
       // Switching to a fixed port requires rebinding before the Named Tunnel
       // starts; a running tunnel must be stopped first.
@@ -240,10 +243,12 @@ export function createSidecarRuntime(deps) {
 
       pendingStart = { transport: merged.transport };
       try {
-        const tunnel = await ensureTunnel();
         const settings = merged.transport === 'quick'
           ? { transport: 'quick' }
-          : { transport: 'named', namedToken: merged.namedToken, publicUrl: merged.publicUrl };
+          : merged.transport === 'tailscale'
+            ? { transport: 'tailscale', publicUrl: merged.publicUrl }
+            : { transport: 'named', namedToken: merged.namedToken, publicUrl: merged.publicUrl };
+        const tunnel = await ensureTunnel(settings);
         const { publicUrl } = await tunnel.start(settings);
         setPublicOrigin(safeUrl(publicUrl));
         lastTransport = merged.transport;
@@ -499,6 +504,7 @@ export async function main(env = process.env) {
     currentGatewayPort = address.port;
     // The tunnel manager captured the old port; drop it so it is recreated.
     tunnelManager = null;
+    tunnelManagerTransport = null;
     logger.info('gateway.rebound', { port: currentGatewayPort });
     return currentGatewayPort;
   }
@@ -509,6 +515,8 @@ export async function main(env = process.env) {
   let cloudflaredPromise = null;
   /** @type {ReturnType<typeof createTunnelManager>|null} */
   let tunnelManager = null;
+  /** @type {'quick'|'named'|'tailscale'|null} */
+  let tunnelManagerTransport = null;
 
   /**
    * Resolve cloudflared once (memoised) and remember its path.
@@ -551,18 +559,37 @@ export async function main(env = process.env) {
     }
   }
 
-  /** @returns {Promise<ReturnType<typeof createTunnelManager>>} */
-  async function ensureTunnel() {
-    if (tunnelManager) return tunnelManager;
-    const resolvedPath = await resolveCloudflared();
-    if (!tunnelManager) {
-      tunnelManager = createTunnelManager({
-        cloudflaredPath: resolvedPath,
-        gatewayPort: currentGatewayPort,
-        logger,
-        onState: handleTunnelState,
-      });
+  /**
+   * Create (or reuse) the transport manager for one start.
+   *
+   * A `tailscale` start needs no cloudflared binary: Tailscale Serve already
+   * forwards HTTPS to the loopback gateway, so resolving cloudflared would
+   * trigger an unnecessary 55 MB download.
+   *
+   * @param {{transport: 'quick'|'named'|'tailscale'}} settings
+   * @returns {Promise<ReturnType<typeof createTunnelManager>>}
+   */
+  async function ensureTunnel(settings) {
+    const transport = settings?.transport ?? 'quick';
+    if (tunnelManager && tunnelManagerTransport === transport) return tunnelManager;
+    if (tunnelManager) {
+      try {
+        await tunnelManager.stop();
+      } catch (error) {
+        logger.warn('tunnel.recreate-stop-failed', { error });
+      }
+      tunnelManager = null;
+      tunnelManagerTransport = null;
     }
+    let resolvedPath;
+    if (transport !== 'tailscale') resolvedPath = await resolveCloudflared();
+    tunnelManager = createTunnelManager({
+      cloudflaredPath: resolvedPath,
+      gatewayPort: currentGatewayPort,
+      logger,
+      onState: handleTunnelState,
+    });
+    tunnelManagerTransport = transport;
     return tunnelManager;
   }
 

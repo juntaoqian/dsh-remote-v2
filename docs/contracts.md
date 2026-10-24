@@ -250,11 +250,10 @@ window.__ModuleLoader__.load({ id: 'dsh-remote-v2', factory: (require) => {
 ```js
 // config.json
 {
-  "transport": "quick",
-  "namedToken": "",        // 仅 named
-  "publicUrl": "",         // 仅 named，https URL
-  "gatewayPort": 0,        // 0=随机；named 必须固定端口（1024-65535），
-                           // Cloudflare Public Hostname 指向 http://127.0.0.1:<gatewayPort>
+  "transport": "quick",        // quick | named | tailscale
+  "namedToken": "",            // 仅 named
+  "publicUrl": "",             // named: Cloudflare 域名；tailscale: tailscale serve 的 https 地址
+  "gatewayPort": 0,            // 0=随机（quick）；named/tailscale 必须固定端口（1024-65535）
   "autoStart": false
 }
 ```

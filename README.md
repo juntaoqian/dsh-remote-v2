@@ -94,6 +94,41 @@ port, because the Cloudflare **Public Hostname** is configured to forward to
 > (`~/.dsh/plugins/dsh-remote-v2/config.json`, mode 0600), never logged. Delete
 > and recreate the tunnel to rotate it.
 
+## Tailscale (tailnet-only, no public exposure)
+
+If both the computer and the phone are in the same Tailscale tailnet, `tailscale
+serve` can terminate HTTPS and forward to the plugin gateway. Nothing is exposed
+to the public internet (use `tailscale funnel` instead if you want that), and
+Tailscale ACLs still apply.
+
+1. **Get the machine DNS name**
+   ```powershell
+   & 'C:\Program Files\Tailscale\tailscale.exe' status --json |
+     ConvertFrom-Json | ForEach-Object { $_.Self.DNSName.TrimEnd('.') }
+   # e.g. cxqjt.tail7cbe8.ts.net
+   ```
+2. **Enable Serve once** (tailnet owner): run
+   ```powershell
+   & 'C:\Program Files\Tailscale\tailscale.exe' serve --bg 26001
+   ```
+   If Serve is not enabled yet, the command prints a
+   `https://login.tailscale.com/f/serve?node=...` link — open it and enable Serve
+   for the tailnet. Re-run the command afterwards.
+3. **Configure the plugin** — 设置 → 远程访问:
+   - 传输方式: **Tailscale（tailscale serve）**
+   - 公网地址: `https://cxqjt.tail7cbe8.ts.net`
+   - 本地网关端口: `26001` (same port as step 2)
+   - 保存配置 → 开启.
+4. **Open from the phone** (must be in the tailnet): scan the pairing QR, or open
+   `https://cxqjt.tail7cbe8.ts.net/pair` and type the 8-character code.
+
+`tailscale serve --bg 26001` persists in tailscaled's state and keeps forwarding
+`https://<dns-name>/` → `http://127.0.0.1:26001`. The plugin gateway still checks
+the exact Host (`cxqjt.tail7cbe8.ts.net`) and requires device pairing, so a tailnet
+peer that has not paired gets 401. To stop serving: stop remote access in the
+plugin and run `tailscale serve reset`.
+
+
 
 ## Security model
 

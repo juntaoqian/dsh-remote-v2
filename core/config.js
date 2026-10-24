@@ -137,8 +137,8 @@ export function normalizeConfig(input = {}) {
   const record = /** @type {Record<string, unknown>} */ (input);
 
   const transport = record.transport === undefined ? CONFIG_DEFAULTS.transport : record.transport;
-  if (transport !== 'quick' && transport !== 'named') {
-    throw createConfigError('invalid-config', 'transport must be "quick" or "named"');
+  if (transport !== 'quick' && transport !== 'named' && transport !== 'tailscale') {
+    throw createConfigError('invalid-config', 'transport must be "quick", "named" or "tailscale"');
   }
 
   const rawNamedToken = record.namedToken === undefined ? '' : record.namedToken;
@@ -172,6 +172,17 @@ export function normalizeConfig(input = {}) {
       'invalid-config',
       'named transport requires a fixed gatewayPort (1024-65535) because the Cloudflare public hostname targets http://127.0.0.1:<gatewayPort>',
     );
+  }
+  if (transport === 'tailscale') {
+    if (!publicUrl) {
+      throw createConfigError('invalid-config', 'tailscale transport requires the https publicUrl served by tailscale serve');
+    }
+    if (rawGatewayPort === 0) {
+      throw createConfigError(
+        'invalid-config',
+        'tailscale transport requires a fixed gatewayPort (1024-65535) that tailscale serve forwards to',
+      );
+    }
   }
 
   return {

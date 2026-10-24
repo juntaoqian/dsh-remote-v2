@@ -92,7 +92,7 @@ export function parseTryCloudflareUrl(text) {
  */
 
 /**
- * @typedef {{transport: 'quick'} | {transport: 'named', namedToken: string, publicUrl: string}} TunnelSettings
+ * @typedef {{transport: 'quick'} | {transport: 'named', namedToken: string, publicUrl: string} | {transport: 'tailscale', publicUrl: string}} TunnelSettings
  */
 
 /**
@@ -107,10 +107,16 @@ function normalizeSettings(input) {
     throw codedError('invalid-settings', 'settings object is required');
   }
   const record = /** @type {Record<string, unknown>} */ (input);
-  if (record.transport !== 'quick' && record.transport !== 'named') {
-    throw codedError('invalid-settings', 'transport must be "quick" or "named"');
+  if (record.transport !== 'quick' && record.transport !== 'named' && record.transport !== 'tailscale') {
+    throw codedError('invalid-settings', 'transport must be "quick", "named" or "tailscale"');
   }
   if (record.transport === 'quick') return { transport: 'quick' };
+  if (record.transport === 'tailscale') {
+    // Tailscale Serve terminates TLS and forwards to the loopback gateway; no
+    // cloudflared process runs, only a fixed public URL is advertised.
+    const publicUrl = normalizeHttpsPublicUrl(record.publicUrl, { code: 'invalid-public-url' });
+    return { transport: 'tailscale', publicUrl };
+  }
   if (typeof record.namedToken !== 'string' || !record.namedToken.trim()) {
     throw codedError('invalid-settings', 'namedToken is required for the named transport');
   }
@@ -196,8 +202,8 @@ export function createTunnelManager(options) {
     randomPort = () => randomInt(MIN_METRICS_PORT, MAX_METRICS_PORT + 1),
   } = options ?? {};
 
-  if (typeof cloudflaredPath !== 'string' || !cloudflaredPath) {
-    throw codedError('invalid-options', 'cloudflaredPath is required');
+  if (typeof cloudflaredPath !== 'undefined' && (typeof cloudflaredPath !== 'string' || !cloudflaredPath)) {
+    throw codedError('invalid-options', 'cloudflaredPath must be a non-empty string when provided');
   }
   if (!Number.isInteger(gatewayPort) || gatewayPort <= 0 || gatewayPort > 65_535) {
     throw codedError('invalid-options', 'gatewayPort must be a valid TCP port number');
@@ -529,6 +535,10 @@ export function createTunnelManager(options) {
    */
   function spawnAttempt() {
     if (!settings) return;
+    if (typeof cloudflaredPath !== 'string' || !cloudflaredPath) {
+      failAttempt(codedError('cloudflared-missing', 'cloudflared is not available for this platform'));
+      return;
+    }
     const token = ++attemptToken;
     metricsPort = randomPort();
     stderrTail = '';
@@ -596,11 +606,22 @@ export function createTunnelManager(options) {
     settings = nextSettings;
     reconnects = 0;
     startedAt = now();
-    publicUrl = nextSettings.transport === 'named' ? nextSettings.publicUrl : undefined;
+    publicUrl = nextSettings.transport === 'named' || nextSettings.transport === 'tailscale'
+      ? nextSettings.publicUrl
+      : undefined;
     lastError = undefined;
     metricsPort = undefined;
     hadReady = false;
     attemptToken += 1;
+
+    if (nextSettings.transport === 'tailscale') {
+      // Static transport: Tailscale Serve already forwards HTTPS to the
+      // loopback gateway, so there is nothing to spawn and no readiness poll.
+      hadReady = true;
+      setPhase('ready');
+      log.info('tunnel.ready', { transport: 'tailscale', publicUrl });
+      return { publicUrl: nextSettings.publicUrl };
+    }
 
     const waiter = {
       /** @type {Promise<{publicUrl: string}>} */

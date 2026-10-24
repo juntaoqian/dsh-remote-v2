@@ -19,7 +19,7 @@ function fakeTunnel(phase = 'idle') {
 function createRuntime(overrides = {}) {
   let config = normalizeConfig({})
   let gatewayPort = 25916
-  const calls = { rebound: [], persisted: [] }
+  const calls = { rebound: [], persisted: [], ensureTunnelSettings: [] }
   const runtime = createSidecarRuntime({
     env: { version: '0.0.0-test', stateDir: 'C:/tmp/test' },
     initialConfig: config,
@@ -36,7 +36,10 @@ function createRuntime(overrides = {}) {
     devices: { list: () => [] },
     pairing: { peek: () => ({ state: 'none' }), issue: () => ({ id: 'x', secret: 's', code: 'CODE', createdAt: 0, expiresAt: 1 }) },
     logger: { info() {}, warn() {}, error() {}, debug() {}, recent: () => [] },
-    ensureTunnel: async () => fakeTunnel(overrides.tunnelPhase ?? 'idle'),
+    ensureTunnel: async (settings) => {
+      calls.ensureTunnelSettings.push(settings)
+      return fakeTunnel(overrides.tunnelPhase ?? 'idle')
+    },
     getTunnel: () => (overrides.tunnelPhase && overrides.tunnelPhase !== 'idle' ? fakeTunnel(overrides.tunnelPhase) : null),
     getPublicOrigin: () => undefined,
     setPublicOrigin() {},
@@ -68,6 +71,20 @@ test('quick start keeps the existing random port', async () => {
   const { runtime, calls } = createRuntime()
   await runtime.start({ transport: 'quick', gatewayPort: 0 })
   assert.deepEqual(calls.rebound, [])
+})
+
+test('tailscale start rebinds once and forwards the static public URL', async () => {
+  const { runtime, calls } = createRuntime()
+  await runtime.start({
+    transport: 'tailscale',
+    publicUrl: 'https://cxqjt.tail7cbe8.ts.net',
+    gatewayPort: 26001,
+  })
+  assert.deepEqual(calls.rebound, [26001])
+  assert.deepEqual(calls.ensureTunnelSettings.at(-1), {
+    transport: 'tailscale',
+    publicUrl: 'https://cxqjt.tail7cbe8.ts.net',
+  })
 })
 
 test('a running tunnel refuses configuration changes that need a rebind', async () => {
