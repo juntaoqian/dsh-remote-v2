@@ -1,0 +1,7 @@
+# dsh-remote-v2 — host plugin row.
+# The plugin mounts the loopback-only management API and owns the sidecar
+# process; it never opens the public network by itself (tunnel starts only on
+# an explicit user action from the settings page).
+- insert:
+    - id: dsh-remote-v2
+      name: dsh-remote-v2

@@ -1,0 +1,26 @@
+dsh-remote-v2
+Copyright (c) 2026 dsh-remote-v2 contributors
+Licensed under the MIT License (see LICENSE).
+
+This project is an independent reimplementation inspired by the ideas and
+public interfaces of `AercherC/dsh-remote` (MIT). No code from that project is
+copied verbatim except where explicitly noted below; the architecture, pairing
+model, and security behavior were redesigned.
+
+Third-party components
+----------------------
+
+1. QR Code generator
+   - Component: qrcode-generator (https://github.com/kazuhikoarase/qrcode-generator)
+   - License: MIT
+   - Usage: vendored (unmodified UMD, MIT header retained) as
+     `lib/qrcode-generator.js`. The host generates an SVG string and the
+     settings page renders it as an `<img>` data URL. No network request and no
+     remote QR service is used.
+
+2. cloudflared
+   - Component: Cloudflare cloudflared (https://github.com/cloudflare/cloudflared)
+   - License: Apache-2.0
+   - Usage: downloaded at runtime (pinned version + SHA-256 verified) only when
+     the user explicitly starts the Quick Tunnel transport. It is executed as a
+     separate process and is not bundled with this project.
