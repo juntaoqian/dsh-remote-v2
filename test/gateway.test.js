@@ -48,14 +48,15 @@ function request(port, { method = 'GET', path = '/', headers = {}, body } = {}) 
   })
 }
 
-async function createHarness({ ready = true, launchUrl } = {}) {
+async function createHarness({ ready = true, launchUrl, upstreamStatus } = {}) {
   const upstream = http.createServer((req, res) => {
     const chunks = []
     req.on('data', (chunk) => chunks.push(chunk))
     req.on('end', () => {
-      res.writeHead(200, { 'content-type': 'application/json' })
+      res.writeHead(upstreamStatus ?? 200, { 'content-type': 'application/json' })
       res.end(
         JSON.stringify({
+          status: upstreamStatus ?? 200,
           method: req.method,
           url: req.url,
           headers: req.headers,
@@ -334,5 +335,48 @@ test('websocket upgrade forwards the handshake to the upstream', async () => {
     await gateway.stop()
     await close(upstream)
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('an invalid DSH cookie is relaunched for a document navigation', async () => {
+  const harness = await createHarness({ upstreamStatus: 401 })
+  try {
+    const { token } = await harness.devices.create('phone')
+    const response = await request(harness.port, {
+      path: '/',
+      headers: { cookie: `dsh_remote_v2=${token}`, accept: 'text/html' },
+    })
+    assert.equal(response.status, 302)
+    assert.equal(response.headers.location, 'http://public.test/?token=test-launch-token')
+  } finally {
+    await harness.dispose()
+  }
+})
+
+test('a document navigation without a device cookie lands on the pairing page', async () => {
+  const harness = await createHarness()
+  try {
+    const response = await request(harness.port, {
+      path: '/',
+      headers: { accept: 'text/html' },
+    })
+    assert.equal(response.status, 302)
+    assert.equal(response.headers.location, '/pair')
+  } finally {
+    await harness.dispose()
+  }
+})
+
+test('a 401 from a non-document request is passed through, not relaunched', async () => {
+  const harness = await createHarness({ upstreamStatus: 401 })
+  try {
+    const { token } = await harness.devices.create('phone')
+    const response = await request(harness.port, {
+      path: '/api/session',
+      headers: { cookie: `dsh_remote_v2=${token}`, accept: 'application/json' },
+    })
+    assert.equal(response.status, 401)
+  } finally {
+    await harness.dispose()
   }
 })

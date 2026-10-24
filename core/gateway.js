@@ -308,6 +308,8 @@ export function createGateway(options) {
   const server = createServer((req, res) => {
     void (async () => {
       const pathname = normalizePathname(req.url)
+      // A browser navigating to the app root (not an XHR/asset fetch).
+      const isDocument = req.method === 'GET' && pathname === '/' && String(req.headers.accept ?? '').includes('text/html')
       try {
         if (pathname === '/healthz' && isLoopbackHost(req.headers.host)) {
           sendJson(res, 200, { status: 'ok' })
@@ -342,12 +344,44 @@ export function createGateway(options) {
         }
         const token = tokenFromCookies(req)
         if (token === undefined || (await devices.verify(token)) === undefined) {
+          // A browser that lost its device cookie should land on the pairing
+          // page instead of a bare 401.
+          if (isDocument) {
+            logger?.info?.({ event: 'document_redirect_pair', path: pathname })
+            res.writeHead(302, { location: '/pair', 'cache-control': 'no-store' })
+            res.end()
+            return
+          }
           logger?.warn?.({ event: 'http_rejected_auth', path: pathname })
           sendText(res, 401, 'unauthorized')
           return
         }
         prepareUpstreamHeaders(req)
-        proxy.web(req, res, () => sendText(res, 502, 'bad gateway'))
+        proxy.web(req, res, () => sendText(res, 502, 'bad gateway'), {
+          onResponse(statusCode) {
+            // DSH rotates its launch token and port on every restart, so a
+            // previously paired browser holds a cookie the new process rejects.
+            // Mint a fresh authenticated URL for a document navigation instead
+            // of showing DSH's bare 401 (the phone would otherwise look
+            // "unreachable" after each restart).
+            if (statusCode !== 401 || !isDocument) return false
+            void (async () => {
+              let redirect = `${current.origin}/`
+              if (typeof getLaunchUrl === 'function') {
+                try {
+                  const launch = await getLaunchUrl(current.origin)
+                  if (typeof launch === 'string' && launch !== '') redirect = launch
+                } catch (error) {
+                  logger?.warn?.({ event: 'relaunch_url_failed', message: error?.message })
+                }
+              }
+              logger?.info?.({ event: 'document_relaunch', path: pathname })
+              res.writeHead(302, { 'cache-control': 'no-store', location: redirect, 'referrer-policy': 'no-referrer' })
+              res.end()
+            })()
+            return true
+          },
+        })
       } catch (error) {
         logger?.warn?.({ event: 'gateway_internal_error', path: pathname, message: error?.message })
         if (!res.headersSent) sendText(res, 500, 'internal error')

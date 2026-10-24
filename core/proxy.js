@@ -73,8 +73,10 @@ export function createProxy(options) {
      * @param {import('node:http').IncomingMessage} req
      * @param {import('node:http').ServerResponse} res
      * @param {(error: Error) => void} onError
+     * @param {{ onResponse?: (statusCode: number, upstreamRes: import('node:http').IncomingMessage) => boolean }} [options]
+     *   `onResponse` may claim a response (returns true) after reading/discarding it.
      */
-    web(req, res, onError) {
+    web(req, res, onError, options = {}) {
       const startedAt = Date.now()
       let settled = false
       const fail = (error) => {
@@ -86,6 +88,10 @@ export function createProxy(options) {
 
       const upstreamReq = http.request(upstreamRequestOptions(req), (upstreamRes) => {
         settled = true
+        if (typeof options.onResponse === 'function' && options.onResponse(upstreamRes.statusCode ?? 0, upstreamRes) === true) {
+          upstreamRes.resume()
+          return
+        }
         // Strip hop-by-hop headers the upstream must not hand back verbatim.
         const headers = {}
         for (const [name, value] of Object.entries(upstreamRes.headers)) {
