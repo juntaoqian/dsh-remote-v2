@@ -1,7 +1,7 @@
 # dsh-remote-v2 使用指南
 
 > 适用版本：**0.1.0** · Windows x64 · DSH Desktop `>= 0.2.1-rc.2`
-> 仓库：<https://github.com/juntaoqian/dsh-remote-v2>（当前为 **private** 仓库）
+> 仓库：<https://github.com/juntaoqian/dsh-remote-v2>（**公开仓库**，无需登录即可克隆）
 
 这个插件让你的手机/平板通过 **Tailscale**、**Cloudflare Named Tunnel** 或 **Cloudflare Quick Tunnel** 安全访问电脑上的 DeepSeek Harness：
 
@@ -50,7 +50,7 @@
 2. 把提示词里的仓库地址替换成该本地路径；
 3. 其余步骤完全一样。
 
-> 私有仓库需要登录凭据；若要让 AI 直接 `git clone`，可以先把仓库临时设为 public，或让 AI 使用本机已配置的 Git 凭据。
+> 仓库已公开，`git clone` 不需要任何凭据；只有所在网络无法访问 GitHub 时才需要上面的替代方案。
 
 ---
 
