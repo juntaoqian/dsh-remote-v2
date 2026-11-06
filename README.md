@@ -151,3 +151,14 @@ node --test test/
 ## License
 
 MIT. See `LICENSE` and third-party notices in `NOTICE`.
+
+## 维护信息
+
+| 项 | 值 |
+| --- | --- |
+| 版本 | 0.1.0 |
+| 测试 | .github/workflows/ci.yml（push / PR） |
+| CI | node --test（9 个测试文件） |
+| 问题反馈 | https://github.com/juntaoqian/dsh-remote-v2/issues |
+| 源码 | https://github.com/juntaoqian/dsh-remote-v2 |
+| 许可证 | MIT |

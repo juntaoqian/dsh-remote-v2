@@ -4,6 +4,14 @@
   "description": "DSH Remote v2 — isolated, stable remote access for DeepSeek Harness (sidecar gateway + Quick/Named Cloudflare Tunnel + one-time pairing)",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://github.com/juntaoqian/dsh-remote-v2#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juntaoqian/dsh-remote-v2.git"
+  },
+  "bugs": {
+    "url": "https://github.com/juntaoqian/dsh-remote-v2/issues"
+  },
   "icon": "./icon.svg",
   "main": "lib/index.js",
   "exports": {
